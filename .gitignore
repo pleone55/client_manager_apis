@@ -1,0 +1,5 @@
+node_modules/
+dist/
+.env
+client_manager_apis_token.json
+client-manager-e16a6-firebase-adminsdk-ts4tm-663f56deb4.json
