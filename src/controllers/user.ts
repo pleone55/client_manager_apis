@@ -1,28 +1,26 @@
 import { db } from '../util/admin';
 import { Request, Response } from 'express';
 import { Client } from './client';
-
-// type Client = {
-//     name: string;
-//     taskDescription: string;
-//     dueDate: string;
-//     priority: string;
-//     price: number;
-//     createdAt: number;
-// };
+import admin from 'firebase-admin';
+import { auth, signInWithEmailAndPassword, getIdToken, signOut } from '../util/firebase';
 
 interface User {
     name: string;
     email: string;
     password: string;
+    role: string;
     clients: Array<Client>;
-    createdAt: number;
+    createdAt: admin.firestore.FieldValue;
 }
 
-export const createUserData = async(req: Request, res: Response): Promise<Response> => {
+export const signUpUser = async(req: Request, res: Response): Promise<Response> => {
     try {
         const clientEntries: Client[] = [];
+        const role = 'admin';
+
         const { name, email, password } = req.body;
+        if(!name || !email || !password) return res.status(400).json({ 'Error': 'Missing fields' });
+
         const clientRef = await db.collection('Client').get();
         clientRef.forEach((doc: any) => (
             clientEntries.push(doc.data())
@@ -38,12 +36,23 @@ export const createUserData = async(req: Request, res: Response): Promise<Respon
             name: name,
             email: email,
             password: password,
+            role: role,
             clients: clientEntries,
-            createdAt: Date.now()
+            createdAt: admin.firestore.FieldValue.serverTimestamp()
         };
 
+        const { uid } = await admin.auth().createUser({
+            displayName: user.name,
+            email: user.email,
+            password: user.password,
+            emailVerified: false,
+            disabled: false,
+        });
+
+        await admin.auth().setCustomUserClaims(uid, { role });
+
         const userRef = db.collection('Users');
-        await userRef.doc('user').set(user);
+        await userRef.doc('user').set(user, { merge: true });
 
         return res.status(201).send(`Collection ${collectionId} created new document!`);
     } catch (err) {
@@ -54,8 +63,14 @@ export const createUserData = async(req: Request, res: Response): Promise<Respon
     }
 };
 
-export const getUserData = async(req: Request, res: Response): Promise<Response> => {
+export const loginUser = async(req: Request, res: Response): Promise<Response> => {
     try {
+        const { email, password } = req.body;
+        if(!email || !password) return res.status(400).json({ 'Error': 'Missing Credentials!' });
+
+        await signInWithEmailAndPassword(auth, email, password);
+
+        const token = await auth.currentUser?.getIdToken(true);
         const userRef = await db.collection('Users').get();
         const userId = db.collection('Users').id;
 
@@ -68,27 +83,23 @@ export const getUserData = async(req: Request, res: Response): Promise<Response>
 
         if(userDocs.length === 0) return res.status(200).send(`${userId} docs is empty!`);
 
-        return res.status(200).json(userDocs);
-    } catch (err) {
-        return res.status(400).json({
+        return res.status(200).json({ userDocs, token });
+    } catch (err: any) {
+        return res.status(404).json({
             'Error': 'Could not retrieve documents!',
             'Details': `${err}`
         });
     }
 };
 
-// const userConverter = {
-//     toFirestore: (user) => {
-//         return {
-//             id: user.id,
-//             name: user.name,
-//             email: user.email,
-//             password: user.password,
-//             clients: user.clients
-//         };
-//     },
-//     fromFirestore: (snapshot, options) => {
-//         const data = snapshot.data(options);
-//         return new User(data.id, data.name, data.email, data.password, data.clients);
-//     } 
-// };
+export const signOutUser = async(req: Request, res: Response): Promise<Response> => {
+    try {
+        await signOut(auth);
+        return res.status(200).json({ 'Success': 'Successfully signed out!' });
+    } catch (err) {
+        return res.status(500).json({
+            'Error': 'Could not sign out!',
+            'Details': `${err}`
+        });
+    }
+};
